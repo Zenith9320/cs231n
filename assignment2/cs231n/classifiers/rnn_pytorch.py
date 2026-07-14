@@ -133,7 +133,7 @@ class CaptioningRNN:
         #     array of shape (N, T, V).                                            #
         # (5) Use (temporal) softmax to compute loss using captions_out, ignoring  #
         #     the points where the output word is <NULL> using the mask above.     #
-        #                                                                          #       
+        #                                                                          #
         # Please ensure that your implementation is agnostic of the input tensors  #
         # data types.                                                              #
         #                                                                          #
@@ -141,7 +141,17 @@ class CaptioningRNN:
         #                                                                          #
         # You also don't have to implement the backward pass.                      #
         ############################################################################
+        h0 = affine_forward(features, W_proj, b_proj)
+        x = word_embedding_forward(captions_in, W_embed)
 
+        if self.cell_type == "rnn":
+            h = rnn_forward(x, h0, Wx, Wh, b)
+        elif self.cell_type == "lstm":
+            h = lstm_forward(x, h0, Wx, Wh, b)
+
+        scores = temporal_affine_forward(h, W_vocab, b_vocab)
+
+        loss = temporal_softmax_loss(scores, captions_out, mask)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
@@ -205,7 +215,30 @@ class CaptioningRNN:
         # NOTE: we are still working over minibatches in this function. Also if   #
         # you are using an LSTM, initialize the first cell state to zeros.        #
         ###########################################################################
+        H = Wh.shape[0]
 
+        h = affine_forward(features, W_proj, b_proj)
+
+        if self.cell_type == "lstm":
+            c = torch.zeros(N, H, dtype=self.dtype, device=features.device)
+
+        current_word = torch.full(
+            (N,), self._start, dtype=torch.long, device=features.device
+        )
+
+        for t in range(max_length):
+            x = W_embed[current_word]
+
+            if self.cell_type == "rnn":
+                h = rnn_step_forward(x, h, Wx, Wh, b)
+            elif self.cell_type == "lstm":
+                h, c = lstm_step_forward(x, h, c, Wx, Wh, b)
+
+            scores = h @ W_vocab + b_vocab
+
+            current_word = scores.argmax(dim=1)
+
+            captions[:, t] = current_word
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
