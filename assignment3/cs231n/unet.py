@@ -170,7 +170,6 @@ class Unet(nn.Module):
         # Downsampling blocks
         ####################################################################
         for ind, (dim_in, dim_out) in enumerate(in_out):
-            down_block = None
             ##################################################################
             # TODO: Create one UNet downsampling layer `down_block` as a ModuleList.
             # It should be a ModuleList of 3 blocks [ResnetBlock, ResnetBlock, Downsample].
@@ -180,7 +179,11 @@ class Unet(nn.Module):
             # Make sure to exactly follow this structure of ModuleList in order to
             # load a pretrained checkpoint.
             ##################################################################
-
+            down_block = nn.ModuleList([
+                ResnetBlock(dim_in, dim_in, context_dim=context_dim),
+                ResnetBlock(dim_in, dim_in, context_dim=context_dim),
+                Downsample(dim_in, dim_out),
+            ])
             ##################################################################
             self.downs.append(down_block)
 
@@ -196,7 +199,6 @@ class Unet(nn.Module):
         # self.ups will also be a ModuleList of ModuleLists.
         # Each BlockList will contain 3 blocks [Upsample, ResnetBlock, ResnetBlock].
         for ind, (dim_in, dim_out) in enumerate(in_out_ups):
-            up_block = None
             ##################################################################
             # TODO: Create one UNet upsampling layer as a ModuleList.
             # It should be a ModuleList of 3 blocks [Upsample, ResnetBlock, ResnetBlock].
@@ -204,9 +206,13 @@ class Unet(nn.Module):
             # Don't forget to account for the skip connections by having 2 x dim_out
             # channels at the input of both ResnetBlocks.
             ##################################################################
-
-            self.ups.append(up_block)
+            up_block = nn.ModuleList([
+                Upsample(dim_in, dim_out),
+                ResnetBlock(dim_out * 2, dim_out, context_dim=context_dim),
+                ResnetBlock(dim_out * 2, dim_out, context_dim=context_dim),
+            ])
             ##################################################################
+            self.ups.append(up_block)
 
         # Final convolution to map to the output channels
         self.final_conv = nn.Conv2d(dim, channels, 1)
@@ -226,7 +232,13 @@ class Unet(nn.Module):
         # You will have to call self.forward two times.
         # For unconditional sampling, pass None in`text_emb`.
         ##################################################################
+        cond_output = self.forward(x, time, model_kwargs)
 
+        uncond_kwargs = copy.deepcopy(model_kwargs)
+        uncond_kwargs["text_emb"] = None
+        uncond_output = self.forward(x, time, uncond_kwargs)
+
+        x = (cfg_scale + 1) * cond_output - cfg_scale * uncond_output
         ##################################################################
 
         return x
@@ -281,6 +293,27 @@ class Unet(nn.Module):
         #      skip connection from the downsampling path.
         #    - Make sure to pass the context to each ResNet block.
         ##################################################################
+
+        skips = []
+        for down_block in self.downs:
+            for i, layer in enumerate(down_block):
+                if i < len(down_block) - 1:
+                    x = layer(x, context=context)
+                    skips.append(x)
+                else:
+                    x = layer(x)
+
+        x = self.mid_block1(x, context=context)
+        x = self.mid_block2(x, context=context)
+
+        for up_block in self.ups:
+            for i, layer in enumerate(up_block):
+                if i == 0:
+                    x = layer(x)
+                else:
+                    skip = skips.pop()
+                    x = torch.cat([x, skip], dim=1)
+                    x = layer(x, context=context)
 
         ##################################################################
 

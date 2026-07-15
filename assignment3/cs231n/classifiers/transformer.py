@@ -74,20 +74,17 @@ class CaptioningTransformer(nn.Module):
          - scores: score for each token at each timestep, of shape (N, T, V)
         """
         N, T = captions.shape
-        # Create a placeholder, to be overwritten by your code below.
-        scores = torch.empty((N, T, self.vocab_size))
-        ############################################################################
-        # TODO: Implement the forward function for CaptionTransformer.             #
-        # A few hints:                                                             #
-        #  1) You first have to embed your caption and add positional              #
-        #     encoding. You then have to project the image features into the same  #
-        #     dimensions.                                                          #
-        #  2) You have to prepare a mask (tgt_mask) for masking out the future     #
-        #     timesteps in captions. torch.tril() function might help in preparing #
-        #     this mask.                                                           #
-        #  3) Finally, apply the decoder features on the text & image embeddings   #
-        #     along with the tgt_mask. Project the output to scores per token      #
-        ############################################################################
+
+        captions_emb = self.embedding(captions)
+        captions_emb = self.positional_encoding(captions_emb)
+
+        features_proj = self.visual_projection(features)
+        features_proj = features_proj.unsqueeze(1)
+
+        tgt_mask = torch.tril(torch.ones(T, T, device=captions.device))
+
+        decoder_output = self.transformer(captions_emb, features_proj, tgt_mask)
+        scores = self.output(decoder_output)
 
         ############################################################################
         #                             END OF YOUR CODE                             #
@@ -228,9 +225,6 @@ class VisionTransformer(nn.Module):
         Returns:
          - logits: Output classification logits of shape (N, num_classes)
         """
-        N = x.size(0)
-        logits = torch.zeros(N, self.num_classes, device=x.device)
-        
         ############################################################################
         # TODO: Implement the forward pass of the Vision Transformer.             #
         # 1. Convert the input image into a sequence of patch vectors.            #
@@ -240,7 +234,12 @@ class VisionTransformer(nn.Module):
         #    You may find torch.mean useful.                                      #
         # 5. Feed it through a linear layer to produce class logits.              #
         ############################################################################
+        x = self.patch_embed(x)
+        x = self.positional_encoding(x)
+        x = self.transformer(x)
+        x = torch.mean(x, dim=1)
 
+        logits = self.head(x)
         ############################################################################
         #                             END OF YOUR CODE                             #
         ############################################################################
